@@ -1,204 +1,260 @@
-# Proposal B - Extend Platform Variants and Introduce Compatibility Artifact
+# Proposal B - Compatibility Artifact for nodes validation and community projects
 
-This proposal recommends changes to image spec for more granular image selection and introduces a new image compatibility artifact type.
-Based on the artifact, cluster administrators can verify hosts or prepare the appropriate infrastructure for containers.
-
-## Modifications
-
-### Image Spec
-
-Extend the platform variants with new ARM and AMD64 micro-architecture levels.
-
-| ISA/ABI          | architecture | variant |
-|------------------|--------------|---------|
-| ...              | ...          | ...     |
-| ARM 64-bit, v9   | arm          | v9      |
-| AMD64 64-bit, v2 | amd64        | v2      |
-| AMD64 64-bit, v3 | amd64        | v3      |
-| AMD64 64-bit, v4 | amd64        | v4      |
+This proposal introduces a new image compatibility artifact type.
+The first part of the proposal focuses on the artifact and representation of compatibility with the proposed language.
+The second part concerns the tool to be maintained by the OCI orgnization.
+Finally, the last part shows the possible usage scenarios.
 
 ## Image Compatibility Artifact
 
-!["Image Compatibility Artifact"](img/B_artifact.png "Image Compatibility Artifact")
+The purpose of the compatibility artifact is to describe CRITICAL requirements for container images to run on a host, if any.
+It is NOT TO store variation of user configuration of applications and image compatibility on a node.
 
-### Definitions
+### Artifact Manifest
 
-- image-compatibility artifact - an OCI artifact that stores the compatibility spec.
-- Compatibility Spec - a json object that represents a graph of namespaces.
-- Namespace - a validation area under which users can describe plugin specs that are consumed by plugins (executable binaries) as input.
-- Plugin - an executable binary that extracts data and checks compatibility on a host.
+The proposal introduces a new artifact `application/vnd.oci.image-compatibility.v1` and compatibility spec  `application/vnd.oci.image-compatibility.spec.v1+json` media type.
 
-A new imageCompatibility artifact type that contains a layer with a JSON compatibility object.
-The object represents a graph of namespaces.
-Namespace describes the validation area and is another object containing data that provides plugins specification for the corresponding plugins.
-A plugin is an executable binary that validates the host and returns information about success or failure.
-
-### Compatibility Spec
-
-Compatibility spec is a graph that can have multiple roots with different paths.
-If one namespace in the path fails, the path is incompatible with the host.
-Namespace fails if at least one plugin reports an error.
-If all paths fail, the host is not compatible with the container.
-
-The host is compatible with the container if at least one path is completed successfully.
-
-#### Schema
-
-- **`schemaVersion`** *string*
-
-  This REQUIRED property specifies the image manifest schema version. For this version of the specification.
-
-- **`namespaces`** *string-object map*
-
-  This REQUIRED property specifies a map of validation areas.
-
-  - **`<namespace-name>`** *object*
-
-    This REQUIRED property specifies the validation area.
-
-    - **`plugins`** *string-object*
-
-      This OPTIONAL property is a list of plugins specifications.
-
-      - **`<plugin-name>`** *object*
-
-        This REQUIRED property specifies the plugin specification for plugin executable binary that validates the host and returns information about success or failure
-
-        - **`source`** *string*
-
-        This OPTIONAL property specifies an HTTP address of the plugin.
-
-        - **`data`** *object*
-
-        This OPTIONAL property specifies the input data for plugin executable binary.
-
-    - **`refs`** *object*
-
-      This OPTIONAL property specifies the references to other namespaces.
-
-      - **`all`** *array of strings*
-
-        This OPTIONAL property specifies a list of all required namespaces that have to pass that container is considered to be compatible with a host.
-
-      - **`oneOf`** *array of strings*
-
-        This OPTIONAL property specifies a list of namespaces with a condition that at least one namespace has to pass that container is considered to be compatible with a host.
-
-      - **`noneOf`** *array of strings*
-
-        This OPTIONAL property specifies a list of namespaces that cannot pass that container is considered to be compatible with a host.
-
-##### Example
-
-GPU pass-through
+The compatibility spec must be interpreted by a dedicated software.
 
 ```json
 {
-  "schema": "0.1.0",
-  "namespaces": {
-    "kernelMainlineV5": {
-      "plugins": {
-        "kernelVersion": {
-          "source": "<http-something-to-download-plugin>",
-          "data": {
-            "range": "[5.0.0,5.15.0)"
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.oci.image-compatibility.v1",
+  "config": {
+    "mediaType": "application/vnd.oci.empty.v1+json",
+    "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "size": 2
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.oci.image-compatibility.spec.v1+json",
+      "digest": "sha256:4a47f8ae4c713906618413cb9795824d09eeadf948729e213a1ba11a1e31d052",
+      "size": 1710
+    }
+  ],
+  "annotations": {
+    "oci.opencontainers.image.created": "2024-01-02T03:04:05Z"
+  }
+}
+```
+
+### Relation of the Artifact to Image Manifest
+
+```
+ Image Index                                                 
+ +----------------------------------------------------------+
+ |                                                          |
+ |  Image Manifest A             Image Manifest B           |
+ |  +-----------------------+    +-----------------------+  |
+ |  |platform:              |    |platform:              |  |
+ |  |  archictecture: amd64 |    |  archictecture: arm   |  |
+ |  |  os: linux            |    |  os: linux            |  |
+ |  |                       |    |                       |  |
+ |  |digest: abc123         |    |digest: def456         |  |
+ |  +--------------------|--+    +--------------------|--+  |
+ |                       |                            |     |
+ +-----------------------|----------------------------|-----+
+                         |                            |      
+                         |                            |      
+    Artifact A           |       Artifact B           |      
+    +--------------------|--+    +--------------------|--+   
+    |                    |  |    |                    |  |   
+    | Subject Descriptor |  |    | Subject Descriptor |  |   
+    | +------------------|-+|    | +------------------|-+|   
+    | | digest: abc123     ||    | | digest: def456     ||   
+    | +--------------------+|    | +--------------------+|   
+    |                       |    |                       |   
+    +-----------------------+    +-----------------------+   
+```
+
+The design imposes a strong 1 to 1 relationship between the compatibility artifact and the image.
+That allows users to independently release artifacts and attach compatibility to the already existing images.
+
+The disadvantage of this solution is that you cannot create compatibility that points to multiple images having the same requirements.
+
+### Artifact Discovery
+
+If a registry supports referrers API, it should be used for the artifact discovery.
+
+Otherwise, the fallback method on the client said shall be implemented.
+The client:
+1. Fetches the image index.
+1. Iterates over descriptors to check if it's compatibility artifact type.
+1. Validates the subject descriptor to check the correct image reference.
+
+### Compatibility Spec
+
+Compatibility spec (`application/vnd.oci.image-compatibility.spec.v1+json`) must represent compatibility requirements and their relations to each other, nothing more.
+The relations may vary depending on specific conditions such as hardware, operating system etc. 
+
+The specification:
+- Should not put any context into the data structure other than mentioned above.
+- The context appliance should be done by tools that implements specific use cases (for example schedulers, tools to provision nodes etc.).
+- If required, tools that implements specific use cases should transform data to their needs in their own sandbox.
+
+Additionally, an official OCI tool with MINIMAL scope and libraries should be developed by OCI Image Compatibility maintainers.
+For more details, check [OCI Compatibility Tool](#oci-compatibility-tool) section.
+
+#### DAG and Compatibility Groups
+
+The following example demonstrate compatibility spec represented by DAG with nodes where one node represents a compatibility group.
+
+- Container requirements to run VM with GPU passthrough - validated on the host with Intel CPU and NVIDIA GPU
+
+```mermaid
+graph TD;
+    IntelCpu(Intel CPU) --> IntelIommu(Intel IOMMU)
+    AmdCpu(AMD CPU) --> AmdIommu(AMD IOMMU)
+    IntelIommu --> Vfio(VFIO)
+    AmdIommu --> Vfio(VFIO)
+    Vfio --> IntelGpu(Intel GPU)
+    Vfio --> NvidiaGpu(NVIDIA GPU)
+    
+
+style IntelCpu fill:green
+style IntelIommu fill:green
+style Vfio fill:green
+style NvidiaGpu fill:green
+```
+
+#### Compatibility Domains
+
+Compatibility domains are part of compatibility group, and provides data called `facts` that describes container requirements against the host OS. These data can be used by many contexts and tools.
+
+- VFIO compatibility group (DAG node) containing compatibility domains
+
+```mermaid
+graph TD;
+  VFIO --- org.opencontainers.kernel.modules
+  VFIO --- org.opencontainers.kernel.configuration
+```
+
+Check the next section with [the example](#example-of-use) to see real compatibility spec usage.
+
+#### Language proposal to represent compatibility
+
+- **`spec`** *string-object map*
+
+  This REQUIRED property describes the compatibility specification.
+
+  - **`<compatibilityGroup>`** *object*
+
+    This REQUIRED property specifies the compatibility group (a DAG node).
+
+    - **`compatibilities`** *string-object*
+
+      This OPTIONAL property is a list of compatibility domains.
+
+      - **`<compatibilityDomain>`** *object*
+
+        This REQUIRED property specifies the compatibility domain. Unit names are used to identify origin of data and its funcionality. The name must be a valid domain name.
+
+        - **`annotations`** *string-string map*
+
+          This OPTIONAL property specifies optional annotations.
+
+        - **`facts`** *object*
+
+          This REQUIRED property describes data that reflects container requirements against the host OS. Allowed fields must be described in the documentation of the compatibility domain.
+
+    - **`relation`** *object*
+
+      This OPTIONAL property specifies the relation to other compatibility groups (DAG nodes).
+
+      - **`all`** *array of strings*
+
+        This OPTIONAL property specifies a list of all required compatibility groups that must pass that container is considered to be compatible with a host.
+
+      - **`oneOf`** *array of strings*
+
+        This OPTIONAL property specifies a list of compatibility groups with a condition that at least one group has to pass that container is considered to be compatible with a host.
+
+      - **`noneOf`** *array of strings*
+
+        This OPTIONAL property specifies a list of compatibility groups that cannot pass that container is considered to be compatible with a host.
+
+#### Example of use 
+
+- Container running VM that requires direct access to GPU
+
+```json
+{
+  "spec": {
+    "intelCpu": {
+      "compatibilities": {
+        "org.opencontainers.hardware.cpu": {
+          "facts": {
+            "vendor": "GenuineIntel",
+            "virtualization": "VT-x"
           }
-        },
-        "refs": {
-          "all": [
-            "vfio",
-            "cpu",
-            "gpu"
-          ]
         }
+      },
+      "relation": {
+        "all": ["intelIommu"]
+      }
+    },
+    "intelIommu": {
+      "compatibilities": {
+        "org.opencontainers.kernel.cmdline": {
+          "facts": {
+            "intel_iommu": "on"
+          }
+        }
+      },
+      "relation": {
+        "all": ["vfio"]
+      }
+    },
+    "amdCpu": {
+      "compatibilities": {
+        "org.opencontainers.hardware.cpu": {
+          "facts": {
+            "vendor": "GenuineIntel",
+            "virtualization": "AMD-V"
+          }
+        }
+      },
+      "relation": {
+        "all": ["amdIommu"]
+      }
+    },
+    "amdIommu": {
+      "compatibilities": {
+        "org.opencontainers.kernel.cmdline": {
+          "facts": {
+            "amd_iommu": "pt"
+          }
+        }
+      },
+      "relation": {
+        "all": ["vfio"]
       }
     },
     "vfio": {
-      "plugins": {
-        "kernelConfiguration": {
-          "data": {
-            "CONFIG_VFIO": "m",
-            "CONFIG_VFIO_IOMMU_TYPE1": "m",
-            "CONFIG_VFIO_MDEV": "m",
-            "CONFIG_VFIO_MDEV_DEVICE": "m",
-            "CONFIG_VFIO_PCI": "m"
-          }
-        },
-        "kernelModules": {
-          "data": {
+      "compatibilities": {
+        "org.opencontainers.kernel.modules": {
+          "facts": {
             "vfio": {},
             "vfio_iommu_type1": {},
             "vfio-pci": {}
           }
         }
+      },
+      "relation": {
+        "oneOf": ["intelGpu", "nvidiaGpu"]
       }
     },
-    "cpu": {
-      "refs": {
-        "oneOf": [
-          "cpuAmd",
-          "cpuIntel"
-        ]
-      }
-    },
-    "cpuAmd": {
-      "plugins": {
-        "hardware": {
-          "data": {
-            "cpu": ["AuthenticAMD"]
-          }
-        }
-      }
-    },
-    "cpuIntel": {
-      "plugins": {
-        "hardware": {
-          "data": {
-            "cpu": ["GenuineIntel"]
+    "intelGpu": {
+      "compatibilities": {
+        "org.opencontainers.hardware.pci": {
+          "facts": {
+            "class": "0380",
+            "vendor": "8086"
           }
         },
-        "kernelCmdline": {
-          "data": {
-            "intel_iommu": "on"
-          }
-        }
-      }
-    },
-    "gpu": {
-      "refs": {
-        "oneOf": [
-          "gpuNVIDIA",
-          "gpuIntel"
-        ]
-      }
-    },
-    "gpuNVIDIA": {
-      "plugins": {
-        "hardware": {
-          "data": {
-            "pci": ["0380:10de"]
-          }
-        },
-        "kernelConfiguration": {
-          "data": {
-            "CONFIG_HOTPLUG_PCI_PCIE": "y",
-            "CONFIG_MODULES": "y",
-            "CONFIG_MODULE_UNLOAD": "y",
-            "CONFIG_PCI_MMCONFIG": "y",
-            "CONFIG_DRM_NOUVEAU": "n"
-          }
-        }
-      }
-    },
-    "gpuIntel": {
-      "plugins": {
-        "hardware": {
-          "data": {
-            "pci": ["0380:8086"]
-          }
-        },
-        "kernelConfiguration": {
-          "data": {
+        "org.opencontainers.kernel.configuration": {
+          "facts": {
             "CONFIG_DRM": "y",
             "CONFIG_DRM_I915": "y",
             "CONFIG_DRM_I915_USERPTR": "y",
@@ -206,12 +262,29 @@ GPU pass-through
             "CONFIG_DRM_I915_GVT_KVMGT": "m"
           }
         },
-        "kernelModules": {
-          "data": {
+        "org.opencontainers.kernel.modules": {
+          "facts": {
             "kvmgt": {
-              "enable_gvt": "1"
+              "enable_gvt": 1
             }
           }
+        }
+      }
+    },
+    "nvidiaGpu": {
+      "compatibilities": {
+        "org.opencontainers.hardware.pci": {
+          "facts": {
+            "class": "0380",
+            "vendor": "10de"
+          }
+        },
+        "org.opencontainers.kernel.configuration": {
+          "CONFIG_HOTPLUG_PCI_PCIE": "y",
+          "CONFIG_MODULES": "y",
+          "CONFIG_MODULE_UNLOAD": "y",
+          "CONFIG_PCI_MMCONFIG": "y",
+          "CONFIG_DRM_NOUVEAU": "n"
         }
       }
     }
@@ -219,26 +292,50 @@ GPU pass-through
 }
 ```
 
-### Namespace and Plugin
+## OCI Compatibility Tool
 
-!["Namespace and Plugin](img/B_ns-plugin.png "Namespace and Plugin")
+The compatibility tool maintained by OCI should be very minimal in scope
+and it should export pkgs for external tools so they can cover their own use cases.
 
-Namespaces and plugins are core functionality to evaluate if a host is compatible with a container.
-They can look up existing components on a host or just serve as a data source to get additional information about specific resources (like CPU features).
-Although in each case a plugin has to return information about success or failure.
+The suggested scope of functionality should be as follows:
+- create artifact
+- pull and push artifact
+- validate compatibility specification
+- validate host
+- output the compatibility spec in a readable form
 
-The design allows you to build plugins on top of other plugins.
-For instance an Nvidia GPU plugin could include logic of kernelModules and kernelConfiguration to discover if appropriate kernel modules are loaded or disabled.
+### Implementation
 
-#### Plugins Categorization
+The tool should be written in Golang and implement in-tree plugins architecture. 
 
-Plugins are developed by:
+The structure should be similar to:
 
-- OCI Image Compatibility maintainers (atomic plugins)
-- Community (custom plugins)
+```
+cmd/
+pkg/
+  cmd/
+  plugins/
+    core/
+    community/
+      org.telco/
+      org.supercontainers/
+      ...
+  schema/
+```
 
-Atomic plugins serve as the basis for external plugins provided by a community with expertise in specific areas.
-They are divided into the following areas (similarly like in [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery/v0.15/usage/features.html#table-of-contents)):
+- cmd/ - provided cmds
+- pkg/cmd - all cmds should be written in a form that they can be exported
+- pkg/plugins - plugins extracts and validates information on the host.
+  They must match compatibility domains from the compatibility spec.
+  For instance `org.opencontainers.kernel.module` should be able to list and validate kernel modules on the host.
+- pkg/plugins/core - all core plugins maintained by OCI under `org.opencontainers` domain
+- pkg/plugins/community - all community plugins with their own domains with schema.
+  Community maintainers will have access to their own domain directory.
+- pkg/schema - schema with graph implementation
+
+### Core Plugins
+
+The following subjects should be added to core plugins list that are maintained by OCI group:
 
 - CPU
 - Kernel
@@ -249,38 +346,44 @@ They are divided into the following areas (similarly like in [Node Feature Disco
 - Storage
 - System
 
-*Note: We could import part of the NFD project or export the common part and contribute.*
+That is duplicated from the [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery/tree/master/source) project.
+There is a possibility that we could cooperate with NFD community, contribute and import source code responsible for features detection.
 
-#### Distribution of Plugins
+### Security
 
-TBD: verification of the plugins
+- Linux hosts should be protected by AppArmor/SELinux profiles/policies written by maintainers.
+- Each plugin should have its own section in the profile.
+- The profiles must be carefully reviewed by the maintainers.
 
-- Pulled over HTTP - from the address specified in the schema `source` field, pulled to `/opt/oci/image-compatibility/<artifact-digest/plugins`.
-- Attached to artifact layers - extracted to `/opt/oci/image-compatibility/<artifact-digest/plugins`.
-- User-provided - users add plugins to `/opt/oci/image-compatibility/<artifact-digest/plugins`.
+The proposal doesn't have a solution for Windows or illumos.
+This can be determined later with Windows and illumos experts.
 
-### Relation of the Artifact to Image Manifest
+## Usage
 
-![Artifact relation to image manifest](img/B_artifact-relation.png "Artifact Relation to Image Manifest")
+### Goals
 
-The design dictates a strong 1 to 1 relationship between compatibility artifact and image manifest.
-That allows users to independently release artifacts and attach compatibility to the already existing images.
+The primary usage is only to validate host against the compatibility spec.
+Consider the following scenario:
 
-The disadvantage of this solution is that you cannot create compatibility that points to multiple images having the same requirements.
+1. Image author creates an image with a compatibility artifact
+2. Image author pushes the image and the artifact to the registry
+3. Sysadmin pulls the artifact with compatibility spec over the tool.
+4. Sysadmin executes the validate-host cmd provided by the tool (directly on the host).
+5. Sysadmin gets immediate information if the image is compatibile with the host.
 
-#### Artifact Discovery
+### Non-goals
 
-If a registry supports referrers API, it should be used for the artifact discovery.
-Otherwise, the artifact could be pulled directly over a tag.
+The proposal intention is to keep the tool and specification very simple.
+Thus the following scenarios are out of the scope:
 
-### Artifact Management and Host Validation Tool
+- Implement any logic, algorithms or helpers for
+  - External schedulers (like k8s)
+  - Node provisioning
+  - Image selection
+  - etc.
 
-A new tool have to be developed by OCI Image Compatibility maintainers that allows:
-
-- Management of artifacts:
-  - TBD: pending the completion of the requirements.
-- Host validation:
-  - TBD: pending the completion of the requirements.
+All uses cases that require compatibility information should implement their own logic, algorithms or helpers in separate projects.
+As mentioned in the [OCI Compatibility Tool](#oci-compatibility-tool) section: _The compatibility tool maintained by OCI should be very minimal in scope and it should export pkgs for external tools so they can cover their own use cases._
 
 ## Requirements
 
