@@ -69,7 +69,7 @@ The compatibility spec must be interpreted by a dedicated software.
 ```
 
 The design imposes a strong 1 to 1 relationship between the compatibility artifact and the image.
-That allows users to independently release artifacts and attach compatibility to the already existing images.
+That allows users to independently release artirequirements and attach compatibility to the already existing images.
 
 The disadvantage of this solution is that you cannot create compatibility that points to multiple images having the same requirements.
 
@@ -118,9 +118,17 @@ style Vfio fill:green
 style NvidiaGpu fill:green
 ```
 
+The above is just a very specific example.
+There can be more valid combinations like container requirements of:
+
+- Intel CPU with Intel GPU
+- AMD CPU with AMD GPU
+- Intel CPU with Intel, AMD or NVIDIA GPU
+- and much more...
+
 #### Compatibility Domains
 
-Compatibility domains are part of compatibility group, and provides data called `facts` that describes container requirements against the host OS. These data can be used by many contexts and tools.
+Compatibility domains are part of compatibility group, and provides data called `requirements` that describes container requirements against the host OS. These data can be used by many contexts and tools.
 
 - VFIO compatibility group (DAG node) containing compatibility domains
 
@@ -134,162 +142,86 @@ Check the next section with [the example](#example-of-use) to see real compatibi
 
 #### Language proposal to represent compatibility
 
-- **`spec`** *string-object map*
+- **`spec`** *object*
 
   This REQUIRED property describes the compatibility specification.
 
-  - **`<compatibilityGroup>`** *object*
+  - **`graphs`** *string-object map*
 
-    This REQUIRED property specifies the compatibility group (a DAG node).
+    This REQUIRED property is a list of graphs that represent container compatibility.
 
-    - **`compatibilities`** *string-object*
+    - **`<graphName>`** *string-object map*
 
-      This OPTIONAL property is a list of compatibility domains.
+      This REQUIRED property specifies a graph name that is later referenced in the *compatibilityCriteria* field.
 
-      - **`<compatibilityDomain>`** *object*
+      - **`<nodeName>`** *object*
 
-        This REQUIRED property specifies the compatibility domain. Unit names are used to identify origin of data and its funcionality. The name must be a valid domain name.
+        This REQUIRED property references a node name specified in the *nodes* field.
+        Only one property is allowed *all*, *oneOf* or *noneOf*.
 
-        - **`annotations`** *string-string map*
+        - **`all`** *array of strings*
 
-          This OPTIONAL property specifies optional annotations.
+          This OPTIONAL property specifies a list of all nodes that must pass that container is considered to be compatible with a host.
 
-        - **`facts`** *object*
+        - **`oneOf`** *array of strings*
 
-          This REQUIRED property describes data that reflects container requirements against the host OS. Allowed fields must be described in the documentation of the compatibility domain.
+          This OPTIONAL property specifies a list of nodes with a condition that at least one node has to pass that container is considered to be compatible with a host.
 
-    - **`relation`** *object*
+        - **`noneOf`** *array of strings*
 
-      This OPTIONAL property specifies the relation to other compatibility groups (DAG nodes).
+          This OPTIONAL property specifies a list of nodes that cannot pass that container is considered to be compatible with a host.
+
+  - **`nodes`** *string-object map*
+
+    This REQUIRED property specifies graph nodes.
+  
+    - **`<nodeName>`** *object*
+
+      This REQUIRED property specifies a graph node that groups compatibility domains.
+
+      - **`compatibilities`** *string-object map*
+
+        This OPTIONAL property is a list of compatibility domains.
+
+        - **`<compatibilityDomain>`** *object*
+
+          This REQUIRED property specifies the compatibility domain. Domain names are used to identify origin of data and its funcionality. The name must be a valid domain name.
+
+      - **`annotations`** *string-string map*
+
+        This OPTIONAL property specifies user annotations.
+
+  - **`compatibilityCriteria`** *map-string object*
+
+    This REQUIRED property is a list of compatibility criteria.
+
+    - **`<compatibilityCriteriaName>`** 
+
+      This REQUIRED property defines a group of graphs referenced from *graphs* field to determine if a host is compatible with the container.
+      Only one property is allowed *all*, *oneOf* or *noneOf*.
 
       - **`all`** *array of strings*
 
-        This OPTIONAL property specifies a list of all required compatibility groups that must pass that container is considered to be compatible with a host.
+        This OPTIONAL property references list of all graphs that have to pass to consider a host to be compatible with the container.
 
       - **`oneOf`** *array of strings*
 
-        This OPTIONAL property specifies a list of compatibility groups with a condition that at least one group has to pass that container is considered to be compatible with a host.
+        This OPTIONAL property specifies a list of graphs with a condition that at least one graph has to pass that container is considered to be compatible with a host.
 
       - **`noneOf`** *array of strings*
 
-        This OPTIONAL property specifies a list of compatibility groups that cannot pass that container is considered to be compatible with a host.
+        This OPTIONAL property specifies a list of graphs that cannot pass that container is considered to be compatible with a host.
+
+  - **`annotations`** *array of strings*
+
+    This OPTIONAL property specifies user annotations.
 
 #### Example of use 
 
 - Container running VM that requires direct access to GPU
 
 ```json
-{
-  "spec": {
-    "intelCpu": {
-      "compatibilities": {
-        "org.opencontainers.hardware.cpu": {
-          "facts": {
-            "vendor": "GenuineIntel",
-            "virtualization": "VT-x"
-          }
-        }
-      },
-      "relation": {
-        "all": ["intelIommu"]
-      }
-    },
-    "intelIommu": {
-      "compatibilities": {
-        "org.opencontainers.kernel.cmdline": {
-          "facts": {
-            "intel_iommu": "on"
-          }
-        }
-      },
-      "relation": {
-        "all": ["vfio"]
-      }
-    },
-    "amdCpu": {
-      "compatibilities": {
-        "org.opencontainers.hardware.cpu": {
-          "facts": {
-            "vendor": "GenuineIntel",
-            "virtualization": "AMD-V"
-          }
-        }
-      },
-      "relation": {
-        "all": ["amdIommu"]
-      }
-    },
-    "amdIommu": {
-      "compatibilities": {
-        "org.opencontainers.kernel.cmdline": {
-          "facts": {
-            "amd_iommu": "pt"
-          }
-        }
-      },
-      "relation": {
-        "all": ["vfio"]
-      }
-    },
-    "vfio": {
-      "compatibilities": {
-        "org.opencontainers.kernel.modules": {
-          "facts": {
-            "vfio": {},
-            "vfio_iommu_type1": {},
-            "vfio-pci": {}
-          }
-        }
-      },
-      "relation": {
-        "oneOf": ["intelGpu", "nvidiaGpu"]
-      }
-    },
-    "intelGpu": {
-      "compatibilities": {
-        "org.opencontainers.hardware.pci": {
-          "facts": {
-            "class": "0380",
-            "vendor": "8086"
-          }
-        },
-        "org.opencontainers.kernel.configuration": {
-          "facts": {
-            "CONFIG_DRM": "y",
-            "CONFIG_DRM_I915": "y",
-            "CONFIG_DRM_I915_USERPTR": "y",
-            "CONFIG_DRM_I915_GVT": "m",
-            "CONFIG_DRM_I915_GVT_KVMGT": "m"
-          }
-        },
-        "org.opencontainers.kernel.modules": {
-          "facts": {
-            "kvmgt": {
-              "enable_gvt": 1
-            }
-          }
-        }
-      }
-    },
-    "nvidiaGpu": {
-      "compatibilities": {
-        "org.opencontainers.hardware.pci": {
-          "facts": {
-            "class": "0380",
-            "vendor": "10de"
-          }
-        },
-        "org.opencontainers.kernel.configuration": {
-          "CONFIG_HOTPLUG_PCI_PCIE": "y",
-          "CONFIG_MODULES": "y",
-          "CONFIG_MODULE_UNLOAD": "y",
-          "CONFIG_PCI_MMCONFIG": "y",
-          "CONFIG_DRM_NOUVEAU": "n"
-        }
-      }
-    }
-  }
-}
+
 ```
 
 ## OCI Compatibility Tool
@@ -323,15 +255,15 @@ pkg/
   schema/
 ```
 
-- cmd/ - provided cmds
-- pkg/cmd - all cmds should be written in a form that they can be exported
-- pkg/plugins - plugins extracts and validates information on the host.
+- `cmd/` - provided cmds
+- `pkg/cmd/` - all cmds should be written in a form that they can be exported
+- `pkg/plugins/` - plugins extracts and validates information on the host.
   They must match compatibility domains from the compatibility spec.
-  For instance `org.opencontainers.kernel.module` should be able to list and validate kernel modules on the host.
-- pkg/plugins/core - all core plugins maintained by OCI under `org.opencontainers` domain
-- pkg/plugins/community - all community plugins with their own domains with schema.
+  For instance *org.opencontainers.kernel.module* should be able to list and validate kernel modules on the host.
+- `pkg/plugins/core/` - all core plugins maintained by OCI under `org.opencontainers` domain
+- `pkg/plugins/community/` - all community plugins with their own domains with schema.
   Community maintainers will have access to their own domain directory.
-- pkg/schema - schema with graph implementation
+- `pkg/schema/` - schema with graph implementation
 
 ### Core Plugins
 
@@ -347,7 +279,7 @@ The following subjects should be added to core plugins list that are maintained 
 - System
 
 That is duplicated from the [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery/tree/master/source) project.
-There is a possibility that we could cooperate with NFD community, contribute and import source code responsible for features detection.
+There is a possibility that we could cooperate with NFD community, contribute and/or import the source code responsible for the features detection.
 
 ### Security
 
@@ -376,13 +308,13 @@ Consider the following scenario:
 The proposal intention is to keep the tool and specification very simple.
 Thus the following scenarios are out of the scope:
 
-- Implement any logic, algorithms or helpers for
+- Implement a tool that contains any logic, algorithms or helpers for
   - External schedulers (like k8s)
   - Node provisioning
   - Image selection
   - etc.
 
-All uses cases that require compatibility information should implement their own logic, algorithms or helpers in separate projects.
+All other uses cases that are not mentioned in [Goals](#goals) require compatibility information should implement their own logic, algorithms or helpers in separate projects.
 As mentioned in the [OCI Compatibility Tool](#oci-compatibility-tool) section: _The compatibility tool maintained by OCI should be very minimal in scope and it should export pkgs for external tools so they can cover their own use cases._
 
 ## Requirements
